@@ -172,7 +172,9 @@ struct Panel: View {
         let total = max(s.host?.ram_total_gb ?? s.budget_gb, 1)
         var slices: [Slice] = []
         for (i, r) in m.resources.enumerated() where r.state != "off" {
-            slices.append(Slice(id: r.name, gb: r.actual_gb ?? r.memory_gb, color: Self.palette[i % Self.palette.count]))
+            // while it loads, what it holds so far, so that its slice grows into the bar
+            let holds = r.actual_gb ?? (r.state == "starting" ? 0 : r.memory_gb)
+            slices.append(Slice(id: r.name, gb: holds, color: Self.palette[i % Self.palette.count]))
         }
         let ours = slices.reduce(0) { $0 + $1.gb }
         let used = s.host?.ram_used_gb.compactMap { $0 }.last
@@ -183,9 +185,12 @@ struct Panel: View {
                 HStack(spacing: 1.5) {
                     ForEach(slices) { sl in
                         Rectangle().fill(sl.color).frame(width: max(2, g.size.width * min(1, sl.gb / total)))
+                            .transition(.asymmetric(insertion: .identity, removal: .opacity))
                     }
                     Spacer(minLength: 0)
                 }
+                // The scheduler reports every two seconds; the bar moves between two reports instead of jumping.
+                .animation(.easeInOut(duration: 1.8), value: slices.map(\.gb))
             }
             .frame(height: 8)
             .background(GeometryReader { g in
@@ -202,12 +207,13 @@ struct Panel: View {
                 ForEach(slices) { sl in
                     HStack(spacing: 4) {
                         Circle().fill(sl.color).frame(width: 6, height: 6)
-                        Text("\(sl.id) \(gb(sl.gb))").lineLimit(1)
+                        Text("\(sl.id) \(gb(sl.gb))").lineLimit(1).contentTransition(.numericText())
                     }
                 }
-                Text("\(gb(free)) free").foregroundStyle(.tertiary).lineLimit(1)
+                Text("\(gb(free)) free").foregroundStyle(.tertiary).lineLimit(1).contentTransition(.numericText())
             }
             .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            .animation(.easeInOut(duration: 0.6), value: slices.map(\.gb))
         }
     }
 
