@@ -16,20 +16,18 @@ Run more local AI than fits into your Mac's memory at once.
 
 ### The problem
 
-A model server asks how much memory the model gets, and then keeps it. That works for one model. With a
-chat model, a coding model, an image generator and a speech model on one machine, something is always in
+With a chat model, a coding model, an image generator and a speech model on one machine, something is always in
 the way of something else, and you end up starting and stopping servers by hand.
 
 ### What Pinecone does
 
-- **You say what the system keeps, not what a model gets.** One number: the memory left for macOS and your
-  apps. Everything else belongs to models, and Pinecone raises the Mac's GPU memory limit to match.
+- **You say what the system keeps, not what a model gets.** And by default it pins the OS to a bare minimum and raises the Mac's GPU memory limit to match. Everything else belongs to models.
 - **It loads and unloads for you.** A request for a model that is not in memory starts it. If it does not fit,
   whatever is idle goes first. A request waits while that happens; nothing that is working is ever stopped.
 - **It is made for tight machines.** One large model that needs the whole Mac, or a bundle of smaller ones
   side by side, or both in turn: the space you gave it is never exceeded.
-- **Services become tools.** Image, music and speech servers are not chat models, so Pinecone wraps them in
-  an MCP server that describes what they can do. A tool is an entry in the config, not code.
+- **Services become MCP tools automatically.** Image gen, music and speech servers are not chat models, so Pinecone wraps them into
+  a MCP server that describes what they can do. You give this URL to your agent and it will be able to handle all your assets.
 
 That leaves a client with two addresses, both shown in the menu bar app:
 
