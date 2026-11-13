@@ -8,3 +8,8 @@ scheduler/tests/tokens.json
 menubar/.build/
 menubar/build/
 laptop-models.json
+reel/*.mp4
+reel/sfx.wav
+reel/sfx.json
+reel/frames/
+node_modules/

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pinecone reel</title>
+<style>
+@font-face { font-family: "JBM"; src: url("assets/jetbrains-mono-latin.woff2") format("woff2"); font-weight: 100 800; }
+:root { --fg: #e4e6eb; --gray: #6e7381; --accent: #87d787; --amber: #e8c873; --green: #5fd7a7; --cyan: #7fb0e6; --magenta: #c792ea; --user: #3a3b40;
+        --ok: #32d74b; --busy: #ff9f0a; --off: rgba(235,235,245,.28); }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #08090c; }
+#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #020203; font-family: -apple-system, "Helvetica Neue", sans-serif; color: var(--fg); }
+#world { position: absolute; inset: 0; transform-origin: 0 0; }
+#desk { position: absolute; left: -400px; top: -300px; width: 2720px; height: 1680px; background: #020203 url("assets/backdrop.jpg") center / cover no-repeat; }
+#desk::after { content: ""; position: absolute; inset: 0; background: rgba(4,6,8,.35); }
+
+/* ---- the menu bar ---- */
+#menubar { position: absolute; left: 0; right: 0; top: 0; height: 36px; background: rgba(20,22,26,.72); backdrop-filter: blur(30px); display: flex; align-items: center; padding: 0 22px; font: 500 16px -apple-system, sans-serif; color: #e9e9ee; }
+#menubar .left { display: flex; gap: 24px; } #menubar .left b { font-weight: 700; }
+#menubar .right { margin-left: auto; display: flex; gap: 22px; align-items: center; color: #dedee4; }
+#menubar .ico { width: 20px; height: 20px; border-radius: 5px; background: rgba(255,255,255,.55); }
+#menubar .ico.r { border-radius: 50%; }
+#mark { width: 21px; height: 21px; display: block; }
+
+/* ---- the terminal ---- */
+.win { position: absolute; border-radius: 14px; background: rgba(24,27,36,.92); backdrop-filter: blur(38px) saturate(1.2); box-shadow: 0 0 0 1px rgba(255,255,255,.11), 0 40px 90px rgba(0,0,0,.6); overflow: hidden; }
+#term { left: 70px; top: 70px; width: 1190px; height: 910px; }
+.bar { position: absolute; left: 0; right: 0; top: 0; height: 50px; }
+.lights { position: absolute; left: 20px; top: 17px; display: flex; gap: 10px; }
+.lights b { width: 15px; height: 15px; border-radius: 50%; display: block; }
+.lights b:nth-child(1) { background: #ee6a5f; } .lights b:nth-child(2) { background: #f5bd4f; } .lights b:nth-child(3) { background: #61c454; }
+.title { position: absolute; left: 96px; top: 13px; font: 600 17px -apple-system, sans-serif; color: #9a9ea9; }
+#talk { position: absolute; left: 30px; right: 30px; top: 60px; bottom: 96px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; font: 22px/32px "JBM", Menlo, monospace; font-variant-ligatures: none; }
+#talk > div { flex: none; white-space: pre-wrap; margin-top: 12px; }
+#talk .user { background: var(--user); border-radius: 6px; padding: 5px 14px; }
+#talk .d { color: var(--gray); } #talk .g { color: var(--green); } #talk .am { color: var(--amber); } #talk .c { color: var(--cyan); } #talk .m { color: var(--magenta); } #talk .a { color: var(--accent); }
+#talk img.pic { display: block; width: 330px; height: 330px; border-radius: 8px; object-fit: cover; }
+#talk .clip { position: relative; width: 480px; height: 270px; border-radius: 8px; overflow: hidden; background: #000; }
+#talk .clip img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform-origin: 50% 62%; }
+#talk .clip .bar2 { position: absolute; left: 12px; right: 12px; bottom: 10px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.3); }
+#talk .clip .bar2 i { display: block; height: 100%; border-radius: 2px; background: #fff; }
+#talk .chip { display: inline-flex; align-items: center; gap: 12px; padding: 5px 14px; border-radius: 8px; background: #2a2d3a; }
+#talk .wave { display: inline-flex; align-items: center; gap: 3px; height: 26px; }
+#talk .wave i { display: block; width: 4px; border-radius: 2px; background: var(--accent); }
+#talk .row { display: flex; gap: 14px; }
+#talk .row .n { width: 150px; } #talk .row .w { width: 250px; }
+#prompt { position: absolute; left: 30px; right: 30px; bottom: 44px; height: 44px; border-radius: 8px; background: #20232e; box-shadow: 0 0 0 1.5px rgba(255,255,255,.1); font: 22px/44px "JBM", Menlo, monospace; padding: 0 14px; white-space: pre; }
+#prompt .caret { display: inline-block; width: 11px; height: 26px; background: #dfe3ee; vertical-align: -5px; }
+#foot { position: absolute; left: 32px; right: 32px; bottom: 12px; font: 16px/24px "JBM", Menlo, monospace; color: var(--gray); display: flex; justify-content: space-between; }
+
+/* ---- the Pinecone panel: the real one, redrawn ---- */
+#panel { position: absolute; left: 994px; top: 35px; width: 400px; zoom: 1.34; /* left and top are in its own, zoomed measure */ border-radius: 13px; background: rgba(38,38,42,.94); backdrop-filter: blur(40px) saturate(1.3); box-shadow: 0 0 0 1px rgba(255,255,255,.14), 0 30px 70px rgba(0,0,0,.6); padding: 16px; font: 13px -apple-system, sans-serif; color: #f2f2f5; transform-origin: 78% 0; }
+#panel .hd { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+#panel .hd .dot { width: 9px; height: 9px; border-radius: 50%; }
+#panel .hd b { font-size: 15px; font-weight: 700; }
+#panel .hd span { margin-left: auto; color: rgba(235,235,245,.6); }
+.sw { width: 30px; height: 18px; border-radius: 9px; background: #0a84ff; position: relative; }
+.sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 .5px 1px rgba(0,0,0,.3); }
+#panel .mem { height: 8px; border-radius: 4px; overflow: hidden; background: rgba(255,255,255,.1); position: relative; display: flex; gap: 1.5px; }
+#panel .mem i { display: block; height: 100%; flex: none; }
+#panel .mem .keep { position: absolute; right: 0; top: 0; bottom: 0; background: rgba(255,255,255,.2); }
+#panel .lg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; margin: 6px 0 14px; font-size: 11px; color: rgba(235,235,245,.6); font-variant-numeric: tabular-nums; }
+#panel .lg span i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+#panel .lg .free { color: rgba(235,235,245,.3); }
+#panel h6 { margin: 0 0 8px; font-size: 11px; font-weight: 600; color: rgba(235,235,245,.6); display: flex; }
+#panel h6 em { margin-left: auto; font-style: normal; font-weight: 400; color: rgba(235,235,245,.3); }
+#panel .sec { margin-bottom: 14px; }
+#panel .res { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+#panel .res .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+#panel .res .nm { flex: 1; min-width: 0; }
+#panel .res .nm b { display: block; font-size: 13px; font-weight: 500; }
+#panel .res .nm small { display: block; font-size: 11px; color: rgba(235,235,245,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#panel .res.off .nm b { color: rgba(235,235,245,.6); }
+#panel .res .tint { width: 10px; height: 6px; border-radius: 1.5px; flex: none; }
+#panel .res .dt { font-size: 11px; color: rgba(235,235,245,.6); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#panel .res.off .dt { color: rgba(235,235,245,.3); }
+#panel .ej { width: 27px; height: 19px; border-radius: 6px; background: rgba(255,255,255,.08); font-size: 8px; display: flex; align-items: center; justify-content: center; flex: none; }
+#panel .gr { display: flex; gap: 8px; margin-bottom: 14px; }
+#panel .gr div { flex: 1; border-radius: 8px; background: rgba(255,255,255,.05); padding: 10px; }
+#panel .gr small { display: block; font-size: 11px; color: rgba(235,235,245,.6); }
+#panel .gr b { font: 600 17px ui-rounded, -apple-system, sans-serif; font-variant-numeric: tabular-nums; } #panel .gr b i { font: 400 10px -apple-system; color: rgba(235,235,245,.3); margin-left: 3px; }
+#panel .gr svg { display: block; width: 100%; height: 34px; margin-top: 6px; }
+#panel .ep { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+#panel .ep div { flex: 1; min-width: 0; } #panel .ep small { display: block; font-size: 11px; color: rgba(235,235,245,.6); }
+#panel .ep code { font: 11px "JBM", Menlo, monospace; white-space: nowrap; }
+#panel .btn { padding: 4px 9px; border-radius: 6px; background: rgba(255,255,255,.08); font-size: 11px; font-weight: 500; }
+#panel .act div { display: flex; gap: 8px; font-size: 11px; color: rgba(235,235,245,.6); margin-bottom: 5px; }
+#panel .act div span { width: 40px; text-align: right; color: rgba(235,235,245,.3); font-variant-numeric: tabular-nums; flex: none; }
+#panel .wait div { font-size: 12px; margin-bottom: 4px; } #panel .wait small { display: block; font-size: 11px; color: rgba(235,235,245,.6); }
+
+/* ---- captions, pointer, cards ---- */
+#caption { position: absolute; left: 0; right: 0; top: 1004px; text-align: center; z-index: 55; }
+#caption span { display: inline-block; padding: 10px 28px 12px; border-radius: 30px; background: rgba(9,10,14,.92); box-shadow: 0 6px 28px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.08); font: 600 30px -apple-system, sans-serif; color: #f4f4f6; }
+#cursor { position: absolute; left: 0; top: 0; width: 30px; height: 30px; z-index: 50; filter: drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
+#ring { position: absolute; left: 0; top: 0; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; border: 2.5px solid rgba(135,215,135,.95); z-index: 49; }
+.card { position: absolute; inset: 0; z-index: 60; background: #050607; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.card img { width: 1180px; }
+.card p { margin: 54px 0 0; font: 500 38px -apple-system, sans-serif; color: #c9ccd4; }
+.card table { margin-top: 64px; border-spacing: 0 14px; font: 28px "JBM", Menlo, monospace; text-align: left; }
+.card td { padding: 0 22px; } .card td:first-child { color: #8b8f9b; font: 500 26px -apple-system, sans-serif; text-align: right; }
+.card .gh { margin-top: 56px; font: 26px "JBM", Menlo, monospace; color: #8b8f9b; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="world">
+    <div id="desk"></div>
+    <div id="menubar">
+      <div class="left"><b>pine</b><span>Shell</span><span>Edit</span><span>View</span><span>Window</span></div>
+      <div class="right"><span id="markbox"></span><i class="ico"></i><i class="ico r"></i><i class="ico"></i><span>Fri 13 Nov&nbsp; 12:48</span></div>
+    </div>
+    <div class="win" id="term">
+      <div class="bar"><div class="lights"><b></b><b></b><b></b></div><div class="title">pine · main</div></div>
+      <div id="talk"></div>
+      <div id="prompt"></div>
+      <div id="foot"><span id="footl"></span><span>/model to switch · the tools come from pinecone</span></div>
+    </div>
+    <div id="panel"></div>
+    <svg id="cursor" viewBox="0 0 34 34"><path d="M5 3l0 24 6.5-6 4.5 10 4-1.8-4.5-9.8 8.5-.4z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    <div id="ring"></div>
+  </div>
+  <div id="caption"></div>
+  <div class="card" id="open"><img src="assets/logo.svg"><p>Run more local AI than fits into your Mac's memory at once.</p></div>
+  <div class="card" id="close"><img src="assets/logo.svg">
+    <table><tr><td>models</td><td>http://your-mac:8080/v1</td></tr><tr><td>tools</td><td>http://your-mac:8090/mcp</td></tr></table>
+    <div class="gh">github.com/pmndrs/pinecone</div></div>
+</div>
+<script src="film.js"></script>
+</body>
+</html>
