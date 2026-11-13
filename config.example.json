@@ -1,0 +1,649 @@
+{
+  "system_reserve_gb": 8,
+  "resources": {
+    "small": {
+      "type": "llm",
+      "title": "A small chat model",
+      "memory_gb": 8,
+      "port": 8101,
+      "cmd": [
+        "$LLAMA_SERVER", "-m", "$MODELS/your-model.gguf", "--alias", "small", "-ngl", "99", "-c", "16384", "--host",
+        "127.0.0.1", "--port", "$PORT"
+      ]
+    },
+    "comfy": {
+      "type": "service",
+      "title": "ComfyUI (images, music, sound effects)",
+      "memory_gb": 24,
+      "idle_stop_s": 900,
+      "port": 8188,
+      "health": "/system_stats",
+      "cwd": "$COMFY",
+      "cmd": ["$COMFY/.venv/bin/python", "main.py", "--listen", "127.0.0.1", "--port", "$PORT"]
+    },
+    "audio": {
+      "type": "service",
+      "title": "mlx-audio (speech, transcription)",
+      "memory_gb": 10,
+      "idle_stop_s": 900,
+      "port": 8189,
+      "health": "/v1/models",
+      "cwd": "$AUDIO",
+      "cmd": [
+        "$AUDIO/.venv/bin/python", "-m", "mlx_audio.server", "--host", "127.0.0.1", "--port", "$PORT"
+      ]
+    }
+  },
+  "media": {
+    "comfy_input_dir": "$COMFY/input",
+    "models": {
+      "image_unet": "qwen_image_2.1_bf16.safetensors",
+      "image_clip": "qwen3vl_8b_bf16.safetensors",
+      "image_vae": "qwen_image_2.1_vae_bf16.safetensors",
+      "image_turbo_lora": "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "music_unet": "acestep_v1.5_xl_turbo_bf16.safetensors",
+      "music_clip1": "qwen_0.6b_ace15.safetensors",
+      "music_clip2": "qwen_4b_ace15.safetensors",
+      "music_vae": "ace_1.5_vae.safetensors",
+      "sfx_checkpoint": "stable_audio_3_small_sfx.safetensors",
+      "audio_checkpoint": "stable_audio_3_medium.safetensors",
+      "audio_clip": "t5gemma_b_b_ul2.safetensors",
+      "tts_fast": "mlx-community/Kokoro-82M-bf16",
+      "tts_realistic": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16",
+      "tts_design": "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16",
+      "stt": "mlx-community/whisper-large-v3-turbo-asr-fp16"
+    }
+  },
+  "tools": {
+    "generate_image": {
+      "description": "Create an image from a text description (Qwen-Image 2.1).\n\nThe PNG is saved on the server: the answer gives its name, a download link and a preview picture.",
+      "service": "comfy",
+      "params": {
+        "prompt": {
+          "type": "string",
+          "required": true,
+          "description": "In English, a detailed description of the finished picture: subject, setting, lighting, style, and any text that should appear in it."
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+          "default": "1:1"
+        },
+        "size": {
+          "type": "string",
+          "enum": ["standard", "large"],
+          "default": "standard",
+          "description": "\"standard\" is about 1 megapixel (20-40 s); \"large\" is about 4 megapixels and takes several minutes."
+        },
+        "fast": {"type": "boolean", "default": false, "description": "8 steps for a quick draft."},
+        "negative_prompt": {"type": "string", "default": "", "description": "What the picture should not show."},
+        "seed": {
+          "type": "integer",
+          "default": "random",
+          "description": "Give the same number again to get the same result; chosen at random if left out."
+        }
+      },
+      "values": {
+        "scale": {"from": "$size", "map": {"standard": 1, "large": 2}},
+        "width": {
+          "from": "$aspect_ratio",
+          "map": {"1:1": 1024, "16:9": 1344, "9:16": 768, "4:3": 1152, "3:4": 864, "3:2": 1216, "2:3": 832},
+          "times": "$scale"
+        },
+        "height": {
+          "from": "$aspect_ratio",
+          "map": {"1:1": 1024, "16:9": 768, "9:16": 1344, "4:3": 864, "3:4": 1152, "3:2": 832, "2:3": 1216},
+          "times": "$scale"
+        },
+        "steps": {"from": "$fast", "map": {"true": 8, "false": 25}}
+      },
+      "run": {
+        "comfy": {
+          "unet": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "$image_unet", "weight_dtype": "default"}
+          },
+          "clip": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": "$image_clip", "type": "qwen_image", "device": "default"}
+          },
+          "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "$image_vae"}},
+          "enc": {
+            "class_type": "TextEncodeQwenImage21",
+            "inputs": {
+              "clip": ["clip", 0],
+              "prompt": "$prompt",
+              "negative_prompt": "$negative_prompt",
+              "resolution": 1024
+            }
+          },
+          "latent": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {"width": "$width", "height": "$height", "batch_size": 1}
+          },
+          "sample": {
+            "class_type": "KSampler",
+            "inputs": {
+              "model": ["unet", 0],
+              "positive": ["enc", 0],
+              "negative": ["enc", 1],
+              "seed": "$seed",
+              "steps": "$steps",
+              "cfg": 1.0,
+              "sampler_name": "euler",
+              "scheduler": "simple",
+              "denoise": 1.0,
+              "latent_image": ["latent", 0]
+            }
+          },
+          "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sample", 0], "vae": ["vae", 0]}},
+          "save": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["decode", 0], "filename_prefix": "mcp/img"}
+          }
+        }
+      },
+      "variants": [
+        {
+          "when": {"fast": true},
+          "patch": {
+            "lora": {
+              "class_type": "LoraLoaderModelOnly",
+              "inputs": {"model": ["unet", 0], "lora_name": "$image_turbo_lora", "strength_model": 1.0}
+            },
+            "sample": {"inputs": {"model": ["lora", 0]}}
+          }
+        }
+      ],
+      "result": {"save": "image", "preview": true}
+    },
+    "edit_image": {
+      "description": "Edit a photo or image by instruction (Qwen-Image 2.1 edit). Keeps the subject's identity.\n\nGood for studio product shots (\"place the product on a seamless light grey studio backdrop, soft overhead lighting, natural contact shadow, keep the product exactly as it is\"), changing backgrounds, lighting, colours, adding or removing objects, restyling. The result keeps the first image's proportions. It is saved on the server: the answer gives its name, a download link and a preview picture.",
+      "service": "comfy",
+      "params": {
+        "image": {"type": "image", "required": true, "description": "The image to edit."},
+        "instruction": {"type": "string", "required": true, "description": "What to change."},
+        "reference_images": {
+          "type": "images",
+          "max": 9,
+          "description": "Extra images the instruction may refer to (\"image 2\"), up to 9."
+        },
+        "size": {
+          "type": "string",
+          "enum": ["standard", "large"],
+          "default": "standard",
+          "description": "\"standard\" is about 1 megapixel (1-2 min); \"large\" about 4 megapixels (7+ min)."
+        },
+        "fast": {"type": "boolean", "default": false, "description": "8 steps for a quick draft."},
+        "seed": {
+          "type": "integer",
+          "default": "random",
+          "description": "Give the same number again to get the same result; chosen at random if left out."
+        }
+      },
+      "values": {
+        "prompt": "$instruction",
+        "images": {"list": ["$image", "$reference_images"]},
+        "resolution": {"from": "$size", "map": {"standard": 1024, "large": 2048}},
+        "steps": {"from": "$fast", "map": {"true": 8, "false": 25}}
+      },
+      "run": {
+        "comfy": {
+          "unet": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "$image_unet", "weight_dtype": "default"}
+          },
+          "clip": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": "$image_clip", "type": "qwen_image", "device": "default"}
+          },
+          "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "$image_vae"}},
+          "enc": {
+            "class_type": "TextEncodeQwenImage21",
+            "inputs": {
+              "clip": ["clip", 0],
+              "prompt": "$prompt",
+              "negative_prompt": "",
+              "resolution": "$resolution",
+              "vae": ["vae", 0]
+            }
+          },
+          "sample": {
+            "class_type": "KSampler",
+            "inputs": {
+              "model": ["unet", 0],
+              "positive": ["enc", 0],
+              "negative": ["enc", 1],
+              "seed": "$seed",
+              "steps": "$steps",
+              "cfg": 1.0,
+              "sampler_name": "euler",
+              "scheduler": "simple",
+              "denoise": 1.0,
+              "latent_image": ["enc", 2]
+            }
+          },
+          "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sample", 0], "vae": ["vae", 0]}},
+          "save": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["decode", 0], "filename_prefix": "mcp/img"}
+          }
+        },
+        "repeat": {
+          "over": "$images",
+          "patch": {
+            "in$i": {"class_type": "LoadImage", "inputs": {"image": "$item"}},
+            "enc": {"inputs": {"images.image_$i": ["in$i", 0]}}
+          }
+        }
+      },
+      "variants": [
+        {
+          "when": {"fast": true},
+          "patch": {
+            "lora": {
+              "class_type": "LoraLoaderModelOnly",
+              "inputs": {"model": ["unet", 0], "lora_name": "$image_turbo_lora", "strength_model": 1.0}
+            },
+            "sample": {"inputs": {"model": ["lora", 0]}}
+          }
+        }
+      ],
+      "result": {"save": "edit", "preview": true}
+    },
+    "remove_background": {
+      "description": "Cut the main subject out of a photo and make a PNG with a transparent background.\n\nThe PNG is saved on the server: the answer gives its name, a download link and a preview picture.",
+      "service": "comfy",
+      "params": {
+        "image": {"type": "image", "required": true, "description": "The photo."},
+        "size": {
+          "type": "string",
+          "enum": ["standard", "large"],
+          "default": "standard",
+          "description": "\"standard\" is about 1 megapixel (1-2 min); \"large\" about 4 megapixels (7+ min)."
+        },
+        "seed": {
+          "type": "integer",
+          "default": "random",
+          "description": "Give the same number again to get the same result; chosen at random if left out."
+        }
+      },
+      "values": {
+        "prompt": "Remove the background, and output a PNG image",
+        "images": {"list": ["$image"]},
+        "resolution": {"from": "$size", "map": {"standard": 1024, "large": 2048}},
+        "steps": 25
+      },
+      "run": {
+        "comfy": {
+          "unet": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "$image_unet", "weight_dtype": "default"}
+          },
+          "clip": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": "$image_clip", "type": "qwen_image", "device": "default"}
+          },
+          "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "$image_vae"}},
+          "enc": {
+            "class_type": "TextEncodeQwenImage21",
+            "inputs": {
+              "clip": ["clip", 0],
+              "prompt": "$prompt",
+              "negative_prompt": "",
+              "resolution": "$resolution",
+              "vae": ["vae", 0]
+            }
+          },
+          "sample": {
+            "class_type": "KSampler",
+            "inputs": {
+              "model": ["unet", 0],
+              "positive": ["enc", 0],
+              "negative": ["enc", 1],
+              "seed": "$seed",
+              "steps": "$steps",
+              "cfg": 1.0,
+              "sampler_name": "euler",
+              "scheduler": "simple",
+              "denoise": 1.0,
+              "latent_image": ["enc", 2]
+            }
+          },
+          "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sample", 0], "vae": ["vae", 0]}},
+          "save": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["decode", 0], "filename_prefix": "mcp/img"}
+          }
+        },
+        "repeat": {
+          "over": "$images",
+          "patch": {
+            "in$i": {"class_type": "LoadImage", "inputs": {"image": "$item"}},
+            "enc": {"inputs": {"images.image_$i": ["in$i", 0]}}
+          }
+        }
+      },
+      "result": {"save": "cutout", "preview": true}
+    },
+    "generate_music": {
+      "description": "Compose a piece of music or a full song (ACE-Step 1.5 XL). The MP3 is saved on the server: the answer gives its name and a download link, and nobody has heard it until it is downloaded and played.",
+      "service": "comfy",
+      "params": {
+        "style": {
+          "type": "string",
+          "required": true,
+          "description": "Comma-separated tags for genre, mood, instruments and vocals, e.g. \"upbeat synthwave, 110 BPM, analog synths, driving bass, female vocals\"."
+        },
+        "lyrics": {
+          "type": "string",
+          "default": "[Instrumental]",
+          "description": "Song text with section markers like [Verse], [Chorus], [Bridge]; leave empty for an instrumental."
+        },
+        "duration_seconds": {"type": "number", "default": 60, "min": 10, "max": 240, "description": "10 to 240."},
+        "bpm": {"type": "integer", "default": 120, "min": 10, "max": 300},
+        "key": {
+          "type": "string",
+          "default": "",
+          "match": "(major|minor)$",
+          "description": "E.g. \"E minor\"; chosen at random if empty."
+        },
+        "language": {
+          "type": "string",
+          "default": "en",
+          "description": "Two-letter code of the lyrics, e.g. en, de, es."
+        },
+        "seed": {
+          "type": "integer",
+          "default": "random",
+          "description": "Give the same number again to get the same result; chosen at random if left out."
+        }
+      },
+      "values": {
+        "keyscale": {
+          "first": [
+            "$key",
+            {
+              "pick": [
+                "C major", "G major", "D major", "A major", "E major", "F major", "A minor", "E minor", "D minor",
+                "B minor", "G minor", "C minor"
+              ]
+            }
+          ]
+        }
+      },
+      "run": {
+        "comfy": {
+          "unet": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "$music_unet", "weight_dtype": "default"}
+          },
+          "shift": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["unet", 0], "shift": 3.0}},
+          "clip": {
+            "class_type": "DualCLIPLoader",
+            "inputs": {
+              "clip_name1": "$music_clip1",
+              "clip_name2": "$music_clip2",
+              "type": "ace",
+              "device": "default"
+            }
+          },
+          "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "$music_vae"}},
+          "enc": {
+            "class_type": "TextEncodeAceStepAudio1.5",
+            "inputs": {
+              "clip": ["clip", 0],
+              "tags": "$style",
+              "lyrics": "$lyrics",
+              "seed": "$seed",
+              "bpm": "$bpm",
+              "duration": "$duration_seconds",
+              "timesignature": "4",
+              "language": "$language",
+              "keyscale": "$keyscale",
+              "generate_audio_codes": true,
+              "cfg_scale": 2.0,
+              "temperature": 0.85,
+              "top_p": 0.9,
+              "top_k": 0,
+              "min_p": 0.0
+            }
+          },
+          "neg": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["enc", 0]}},
+          "latent": {
+            "class_type": "EmptyAceStep1.5LatentAudio",
+            "inputs": {"seconds": "$duration_seconds", "batch_size": 1}
+          },
+          "sample": {
+            "class_type": "KSampler",
+            "inputs": {
+              "model": ["shift", 0],
+              "positive": ["enc", 0],
+              "negative": ["neg", 0],
+              "latent_image": ["latent", 0],
+              "seed": "$seed",
+              "steps": 8,
+              "cfg": 1.0,
+              "sampler_name": "euler",
+              "scheduler": "simple",
+              "denoise": 1.0
+            }
+          },
+          "decode": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["sample", 0], "vae": ["vae", 0]}},
+          "save": {
+            "class_type": "SaveAudioMP3",
+            "inputs": {"audio": ["decode", 0], "filename_prefix": "mcp/music", "quality": "V0"}
+          }
+        }
+      },
+      "result": {
+        "save": "music",
+        "report": {"duration_seconds": "$duration_seconds", "key": "$keyscale", "bpm": "$bpm"}
+      }
+    },
+    "generate_sound": {
+      "description": "Create a sound effect or a short piece of audio (Stable Audio 3). The MP3 is saved on the server: the answer gives its name and a download link, and nobody has heard it until it is downloaded and played.",
+      "service": "comfy",
+      "params": {
+        "prompt": {
+          "type": "string",
+          "required": true,
+          "description": "Describe the sound in English, e.g. \"heavy wooden door creaking open in a stone hall\" or \"rain on a tin roof with distant thunder\"."
+        },
+        "duration_seconds": {"type": "number", "default": 5, "min": 1, "max": 190},
+        "kind": {
+          "type": "string",
+          "enum": ["sound_effect", "ambience_or_loop"],
+          "default": "sound_effect",
+          "description": "\"sound_effect\" uses the sound-effect model (best up to about 30 s); \"ambience_or_loop\" uses the larger general model for ambiences, instrument loops and instrumental beds (up to about 190 s)."
+        },
+        "seed": {
+          "type": "integer",
+          "default": "random",
+          "description": "Give the same number again to get the same result; chosen at random if left out."
+        }
+      },
+      "values": {
+        "checkpoint": {
+          "from": "$kind",
+          "map": {"sound_effect": "$sfx_checkpoint", "ambience_or_loop": "$audio_checkpoint"}
+        }
+      },
+      "run": {
+        "comfy": {
+          "ckpt": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "$checkpoint"}},
+          "clip": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": "$audio_clip", "type": "stable_audio", "device": "default"}
+          },
+          "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": "$prompt"}},
+          "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": ""}},
+          "latent": {
+            "class_type": "EmptyLatentAudio",
+            "inputs": {"seconds": "$duration_seconds", "batch_size": 1}
+          },
+          "sample": {
+            "class_type": "KSampler",
+            "inputs": {
+              "model": ["ckpt", 0],
+              "positive": ["pos", 0],
+              "negative": ["neg", 0],
+              "latent_image": ["latent", 0],
+              "seed": "$seed",
+              "steps": 8,
+              "cfg": 1.0,
+              "sampler_name": "lcm",
+              "scheduler": "simple",
+              "denoise": 1.0
+            }
+          },
+          "decode": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["sample", 0], "vae": ["ckpt", 2]}},
+          "save": {
+            "class_type": "SaveAudioMP3",
+            "inputs": {"audio": ["decode", 0], "filename_prefix": "mcp/sound", "quality": "V0"}
+          }
+        }
+      },
+      "result": {"save": "sound", "report": {"duration_seconds": "$duration_seconds"}}
+    },
+    "speak": {
+      "description": "Turn text into spoken audio. The WAV is saved on the server: the answer gives its name and a download link, and nobody has heard it until it is downloaded and played.",
+      "service": "audio",
+      "params": {
+        "text": {"type": "string", "required": true},
+        "language": {
+          "type": "string",
+          "default": "en",
+          "lower": true,
+          "description": "German needs quality \"realistic\"."
+        },
+        "quality": {
+          "type": "string",
+          "enum": ["fast", "realistic"],
+          "default": "fast",
+          "description": "\"fast\" (Kokoro) starts almost instantly and supports en, en-gb, es, fr, it, pt, hi, ja, zh. \"realistic\" (Qwen3-TTS) is slower and more natural, and supports en, de, fr, es, it, pt, ru, ja, ko, zh."
+        },
+        "voice": {
+          "type": "string",
+          "default": "",
+          "description": "fast: voices look like af_heart, af_bella, am_michael, bf_emma, bm_george. realistic: Vivian, Serena, Ryan, Aiden, Eric, Dylan, Uncle_Fu, Ono_Anna, Sohee."
+        },
+        "style": {
+          "type": "string",
+          "default": "",
+          "description": "realistic only: an optional direction such as \"calm and warm\" or \"excited\"."
+        },
+        "voice_description": {
+          "type": "string",
+          "default": "",
+          "description": "Designs a new voice instead of using a named one, e.g. \"a deep, calm male narrator\" (realistic only)."
+        }
+      },
+      "values": {
+        "model": "$tts_realistic",
+        "use_voice": {"first": ["$voice", "Ryan"]},
+        "lang_code": {
+          "from": "$language",
+          "map": {
+            "en": "English",
+            "de": "German",
+            "fr": "French",
+            "es": "Spanish",
+            "it": "Italian",
+            "pt": "Portuguese",
+            "ru": "Russian",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "zh": "Chinese"
+          },
+          "prefix": "-",
+          "else": "English"
+        }
+      },
+      "run": {
+        "post": "/v1/audio/speech",
+        "json": {
+          "model": "$model",
+          "input": "$text",
+          "voice": "$use_voice",
+          "instruct": "$style",
+          "lang_code": "$lang_code",
+          "response_format": "wav"
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "quality": "fast",
+            "language": {"in": ["en", "en-us", "en-gb", "es", "fr", "hi", "it", "ja", "pt", "zh"]},
+            "voice_description": ""
+          },
+          "values": {
+            "model": "$tts_fast",
+            "use_voice": {
+              "first": ["$voice", {"from": "$language", "map": {"en-gb": "bf_emma"}, "else": "af_heart"}]
+            },
+            "lang_code": {
+              "from": "$language",
+              "map": {
+                "en": "a",
+                "en-us": "a",
+                "en-gb": "b",
+                "es": "e",
+                "fr": "f",
+                "hi": "h",
+                "it": "i",
+                "ja": "j",
+                "pt": "p",
+                "zh": "z"
+              }
+            }
+          },
+          "run": {
+            "post": "/v1/audio/speech",
+            "json": {
+              "model": "$model",
+              "input": "$text",
+              "voice": "$use_voice",
+              "lang_code": "$lang_code",
+              "response_format": "wav"
+            }
+          }
+        },
+        {
+          "when": {"voice_description": {"given": true}},
+          "values": {"model": "$tts_design", "use_voice": "designed"},
+          "run": {
+            "post": "/v1/audio/speech",
+            "json": {
+              "model": "$model",
+              "input": "$text",
+              "instruct": "$voice_description",
+              "lang_code": "$lang_code",
+              "response_format": "wav"
+            }
+          }
+        }
+      ],
+      "result": {"save": "speech", "ext": "wav", "report": {"model": "$model", "voice": "$use_voice"}}
+    },
+    "transcribe": {
+      "description": "Turn speech in an audio file into text (Whisper large-v3-turbo, 99 languages).",
+      "service": "audio",
+      "params": {
+        "audio": {"type": "file", "required": true, "description": "The recording."},
+        "language": {
+          "type": "string",
+          "default": "",
+          "description": "Optional two-letter code such as en or de; detected automatically if empty."
+        }
+      },
+      "run": {
+        "post": "/v1/audio/transcriptions",
+        "form": {"model": "$stt", "response_format": "json", "language": "$language"},
+        "upload": {"file": "$audio"}
+      },
+      "result": {"fields": ["text", "language"]}
+    }
+  }
+}

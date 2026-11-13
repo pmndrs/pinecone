@@ -1,0 +1,10 @@
+# Nothing of a user's lives here: config, key, tokens, logs and files are in ~/.pinecone.
+.venv/
+__pycache__/
+.DS_Store
+*.log
+logs/
+scheduler/tests/tokens.json
+menubar/.build/
+menubar/build/
+laptop-models.json

@@ -1,0 +1,8 @@
+{"listen":{"host":"127.0.0.1","port":18080},"api_key_file":"$CONFIG_DIR/key.txt","memory_budget_gb":100,"starvation_after_s":12,
+ "resources":{
+  "big":{"type":"llm","memory_gb":100,"keep_alive_s":5,"min_residency_s":2,"port":18101,"cmd":["$PYTHON","$CONFIG_DIR/dummy.py","big","$PORT"]},
+  "mid":{"type":"llm","memory_gb":60,"keep_alive_s":3,"min_residency_s":1,"port":18102,"cmd":["$PYTHON","$CONFIG_DIR/dummy.py","mid","$PORT"]},
+  "small":{"type":"llm","memory_gb":50,"keep_alive_s":3,"min_residency_s":1,"port":18104,"cmd":["$PYTHON","$CONFIG_DIR/dummy.py","small","$PORT"]},
+  "svc":{"type":"service","memory_gb":30,"keep_alive_s":2,"min_residency_s":1,"idle_stop_s":6,"port":18103,"cmd":["$PYTHON","$CONFIG_DIR/dummy.py","svc","$PORT"]},
+  "broken":{"type":"llm","memory_gb":10,"port":18105,"cmd":["/usr/bin/false"]}
+ }}

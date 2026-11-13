@@ -1,0 +1,42 @@
+{
+  "providers": {
+    "pinecone": {
+      "name": "Pinecone",
+      "baseUrl": "http://YOUR-MAC:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "$PINECONE_TOKEN",
+      "models": [
+        {
+          "id": "small",
+          "name": "A small chat model (Pinecone)",
+          "contextWindow": 16384,
+          "maxTokens": 4096,
+          "input": [
+            "text"
+          ],
+          "reasoning": true,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "openai",
+            "supportsReasoningEffort": true
+          },
+          "thinkingLevelMap": {
+            "off": "none",
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh"
+          }
+        }
+      ]
+    }
+  }
+}
