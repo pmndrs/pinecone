@@ -28,6 +28,7 @@ the way of something else, and you end up starting and stopping servers by hand.
   side by side, or both in turn: the space you gave it is never exceeded.
 - **Services become MCP tools automatically.** Image gen, music and speech servers are not chat models, so Pinecone wraps them into
   a MCP server that describes what they can do. You give this URL to your agent and it will be able to handle all your assets.
+- **Pair it to Tailscale.** Now you can safely share your inference. Clients meed to authentificate against it of course.
 
 That leaves a client with two addresses, both shown in the menu bar app:
 
