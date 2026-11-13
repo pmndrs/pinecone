@@ -62,16 +62,12 @@ The first start makes `~/.pinecone/config.json`. Put your models in, or hand the
 ```
 
 Pinecone downloads no models and brings no inference engine. It runs the servers you already use
-(llama.cpp, ComfyUI, mlx-audio, anything that listens on a port) and decides when.
+(llama.cpp, ComfyUI, mlx-audio, anything that listens on a port) and decides when to load or unload them.
 
 ### Documentation
 
-- [Setup](docs/setup.md): the scheduler, the media server, the menu bar app, starting at login
-- [Configuration](docs/configuration.md): every setting, variables, how it decides what to unload
-- [Media tools](docs/tools.md): describing a tool in the config, and how files travel
-- [Clients](docs/clients.md): the two endpoints, access tokens, pine and other clients
+- [Setup](docs/setup.md): the scheduler, media server, menu bar app, starting at login
+- [Configuration](docs/configuration.md): settings, variables, how it decides what to unload
+- [Media tools](docs/tools.md): describing tools in the config, and how files travel
+- [Clients](docs/clients.md): our two endpoints, access tokens, pine and other clients
 - [API](docs/api.md) · [The app](docs/app.md) · [Operations](docs/operations.md)
-
-### Licence
-
-MIT. The mark in the logo and the menu bar is the [pmndrs](https://github.com/pmndrs) mark.
