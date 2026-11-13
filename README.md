@@ -16,7 +16,7 @@ Run more local AI than fits into your Mac's memory at once.
 
 ### The problem
 
-With a chat model, a coding model, an image generator and a speech model on one machine, something is always in
+With a chat model, a coding model, an image generator and a speech model on one machine, or large models that almost take the whole vram, something is always in
 the way of something else, and you end up starting and stopping servers by hand.
 
 ### What Pinecone does
