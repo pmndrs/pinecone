@@ -1,12 +1,16 @@
 """keep_cache against a real llama.cpp server: a model that is stopped to make room and started again reads on where it
 was. Not part of the ordinary tests: it needs a llama-server binary and a model file (tiny_model.py makes one in a second).
 
-    python cache_live.py <llama-server> <model.gguf>
+    python cache_live.py <llama-server> <model.gguf> [gpu]
+
+With "gpu" the model is put on the GPU, for a real model: the test then also says how large the files of the kept
+slots are and how long the reload took, which a generated model cannot tell.
 """
 import json, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
 server, model = sys.argv[1], sys.argv[2]
+gpu = len(sys.argv) > 3 and sys.argv[3] == "gpu"
 B = "http://127.0.0.1:18080"; H = {"content-type": "application/json", "Authorization": "Bearer test-key"}
 ok = True
 def check(label, cond, extra=""):
@@ -19,7 +23,7 @@ def chat(name, messages, slot=0):
 def main():
     home = Path(tempfile.mkdtemp()).resolve()
     (home / "key.txt").write_text("test-key")
-    cmd = [server, "-m", model, "-ngl", "0", "-c", "16384", "-np", "2", "--host", "127.0.0.1", "--port", "$PORT"]
+    cmd = [server, "-m", model, "-ngl", "99" if gpu else "0", "-c", "16384", "-np", "2", "--host", "127.0.0.1", "--port", "$PORT"]
     res = lambda port, **more: {"type": "llm", "memory_gb": 60, "keep_alive_s": 2, "min_residency_s": 1, "port": port, "cmd": cmd, **more}
     (home / "config.json").write_text(json.dumps({"listen": {"host": "127.0.0.1", "port": 18080}, "api_key_file": str(home / "key.txt"), "memory_budget_gb": 100,
                                                   "resources": {"kept": res(18112, keep_cache=True), "plain": res(18113)}}))
@@ -34,12 +38,16 @@ def main():
         b = [long, {"role": "user", "content": "another conversation, in the other slot " * 20}]
         more = lambda m, i: m + [{"role": "assistant", "content": "ok"}, {"role": "user", "content": f"message {i}"}]
         for name, other in (("kept", "plain"), ("plain", "kept")):
-            read, _ = chat(name, a, 0); chat(name, b, 1)
+            read, _ = chat(name, a, 0); chat(name, b, 1); read_first = read
             check(f"{name}: a conversation is read once", read > 3000, str(read))
             read, kept = chat(name, more(a, 1), 0)
             check(f"{name}: and read on from there", read < 100 and kept > 3000, f"read {read}, kept {kept}")
             time.sleep(3); chat(other, [{"role": "user", "content": "hi"}]); time.sleep(3)   # does not fit next to it: it is stopped
-            ra, ka = chat(name, more(more(a, 1), 2), 0); rb, kb = chat(name, more(b, 1), 1)
+            if name == "kept":
+                files = sorted((home / "cache" / "kept").glob("slot-*.bin"))
+                print(f"      kept on disk: {len(files)} slots, {sum(f.stat().st_size for f in files) / 1e6:.0f} MB for about {2 * read_first} tokens")
+            t0 = time.time(); ra, ka = chat(name, more(more(a, 1), 2), 0); t1 = time.time(); rb, kb = chat(name, more(b, 1), 1)
+            print(f"      {name}: the first message after the reload was answered after {t1 - t0:.1f}s (with the start of the model)")
             if name == "kept":
                 check("keep_cache: after the reload both conversations are read on where they were", ra < 100 and ka > 3000 and rb < 100 and kb > 3000, f"read {ra} and {rb}, kept {ka} and {kb}")
                 check("keep_cache: the files are used up", not any((home / "cache" / "kept").iterdir()))

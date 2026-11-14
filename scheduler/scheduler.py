@@ -625,10 +625,13 @@ class Scheduler:
                 if time.time() > deadline:
                     raise RuntimeError("did not become ready in time")
                 await asyncio.sleep(1)
+            # Before it is called ready: a request that waits for this model is let through the moment it is, and one
+            # that got in between two slots would be read from its first word in a slot that is empty still, and then
+            # be overwritten by what comes back into it.
+            await self.restore_cache(r)
             r.state = "ready"
             r.error = None
             r.run += 1
-            await self.restore_cache(r)
             r.loaded_at = r.last_used = time.time()
             self.note(f"{r.name} ready after {int(r.loaded_at - r.started_at)}s")
         except Exception as e:  # noqa: BLE001

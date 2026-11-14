@@ -16,6 +16,8 @@ async def chat(r):
 # What a llama.cpp server keeps per slot and can write to disk (--slot-save-path): here, one word per slot.
 import json, os
 save_dir = sys.argv[sys.argv.index("--slot-save-path") + 1] if "--slot-save-path" in sys.argv else None
+# Reading a large slot back takes seconds on a real server: --slow-restore <seconds> makes it take that long here.
+slow = float(sys.argv[sys.argv.index("--slow-restore") + 1]) if "--slow-restore" in sys.argv else 0
 memory = {0: "", 1: ""}
 async def slots(r): return web.json_response([{"id": i, "remembers": m, "save_dir": save_dir} for i, m in memory.items()])
 async def slot(r):
@@ -26,6 +28,7 @@ async def slot(r):
         with open(path, "w") as f: f.write(memory[i])
         return web.json_response({"id_slot": i, "filename": name, "n_saved": len(memory[i]), "n_written": len(memory[i])})
     if action == "restore":
+        await asyncio.sleep(slow)
         with open(path) as f: memory[i] = f.read()
         return web.json_response({"id_slot": i, "filename": name, "n_restored": len(memory[i]), "n_read": len(memory[i])})
     return web.json_response({"error": "unknown action"}, status=400)

@@ -17,6 +17,7 @@ async def slots(s):
 async def main():
     cfg = json.loads((HERE / "config.json").read_text().replace("$CONFIG_DIR", str(HERE)))
     cfg["resources"]["mid"]["keep_cache"] = True
+    cfg["resources"]["mid"]["cmd"] += ["--slow-restore", "1.3"]  # as a real server with a slot of some GB
     home = Path(tempfile.mkdtemp()).resolve()
     path = home / "config.json"
     path.write_text(json.dumps(cfg))
@@ -41,6 +42,11 @@ async def main():
             # mid comes back: it has what it had read, and the files are used up
             st, _ = await chat(s, "mid"); j = await slots(s)
             check("mid has back what it had read", st == 200 and [x["remembers"] for x in j] == ["a long conversation", "another one"], str(j))
+            # The request that brings a model back waits for all its slots: one that was let through after the first slot
+            # would be answered from an empty second slot, and what it left there be overwritten by what comes back late.
+            await chat(s, "small")
+            st, _ = await chat(s, "mid", remember="said by the request that brought it back", slot=1); j = await slots(s)
+            check("a request that waits for the model gets in after every slot is back", st == 200 and [x["remembers"] for x in j] == ["a long conversation", "said by the request that brought it back"], str(j))
             check("the files are used up", not any(kept.iterdir()), str(list(kept.iterdir())))
             # small was stopped without keep_cache: nothing of it is kept, and it comes back empty
             st, _ = await chat(s, "small"); j = await slots(s)
