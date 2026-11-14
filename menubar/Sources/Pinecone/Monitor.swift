@@ -271,6 +271,7 @@ final class Monitor: ObservableObject {
             for f in ["memory_gb", "keep_alive_s", "idle_stop_s"] { add(["resources", n, f], .number, in: cfg) }
         }
         add(["media", "public_url"], .text, in: cfg)
+        add(["media", "keep_days"], .number, in: cfg)
         original = form
         if cfg["system_reserve_gb"] == nil { reserve = savedReserve }  // an older config: saving moves it to the reserve
     }

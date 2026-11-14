@@ -726,6 +726,9 @@ struct SettingsPane: View {
                 setting("Address for other devices", ["media", "public_url"], hint: "this Mac only", wide: true,
                         help: "Shown under Endpoints, for you to give to clients. Takes effect when the media server is started again")
                 Divider()
+                setting("Delete results after", ["media", "keep_days"], hint: "7", unit: "d",
+                        help: "Pictures and sounds the tools made, and uploaded files, are deleted when they are older than this many days. 0 keeps them for good")
+                Divider()
                 if let info {
                     Text((info.tools ?? []).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     ForEach((info.tool_errors ?? [:]).sorted { $0.key < $1.key }, id: \.key) { name, why in

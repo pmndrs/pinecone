@@ -71,6 +71,9 @@ KEY = Path(CFG["api_key_file"]).read_text().strip()
 FILES = Path(CFG["files_dir"])
 FILES.mkdir(parents=True, exist_ok=True)
 COMFY_IN = Path(CFG.get("comfy_input_dir", FILES))  # where ComfyUI looks for input images
+# Where ComfyUI keeps its own copy of what it makes, which is removed once the result is saved here.
+COMFY_OUT = Path(CFG["comfy_output_dir"]) if "comfy_output_dir" in CFG else COMFY_IN.parent / "output" if "comfy_input_dir" in CFG else None
+KEEP_DAYS = float(CFG.get("keep_days", 7))  # results and uploads older than this are deleted; 0: kept for good
 M = CFG["models"]  # names a tool can use as $name, e.g. which model file to load; read again with the tools
 SCHED = CFG["scheduler_url"]
 AUTH = {"Authorization": f"Bearer {KEY}"}
@@ -100,7 +103,7 @@ NEXT = ("This answer is not the file, and you do not have it yet. Do not put `ur
         "path: the `file` name). Step 2: play, show or attach the copy you saved. Only to use it in another tool of "
         "this server, pass `file` and skip the download.")
 INLINE = int(float(CFG.get("inline_mb", 0)) * 2 ** 20)  # sound up to this size also travels inside the answer; 0: never
-LINK_DAYS, UPLOAD_MINUTES = 7, 60
+LINK_DAYS, UPLOAD_MINUTES = min(7, KEEP_DAYS) or 7, 60  # a link does not outlive its file
 
 # Links to files carry their own permission, so that a download tool, a player or curl can use them without the
 # key: the path, the time it runs out, and a signature only this server can make.
@@ -159,6 +162,35 @@ def not_here(ref, ctx):
 
 def new_name(kind, ext):
     return f"{kind}-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}.{ext}"
+
+
+OURS = re.compile(r".+-\d{8}-\d{6}-[0-9a-f]{8}\.\w+$")  # what new_name makes: nothing else in the folder is touched
+
+
+def sweep(now=None):
+    """Delete results and uploads older than keep_days. Returns how many went."""
+    days = KEEP_DAYS
+    with contextlib.suppress(OSError, ValueError, TypeError):  # the setting as it is now, without a restart
+        days = float(read_config()[1].get("keep_days", 7))
+    if days <= 0:
+        return 0
+    gone, before = 0, (now or time.time()) - days * 86400
+    for f in FILES.iterdir():
+        with contextlib.suppress(OSError):
+            if f.is_file() and OURS.fullmatch(f.name) and f.stat().st_mtime < before:
+                f.unlink()
+                gone += 1
+    return gone
+
+
+def drop_comfy_copy(item):
+    """ComfyUI keeps what it made in its output folder; the result is saved here, so that copy can go."""
+    if COMFY_OUT is None or item.get("type", "output") != "output":
+        return
+    with contextlib.suppress(OSError, ValueError):
+        f = (COMFY_OUT / item.get("subfolder", "") / item["filename"]).resolve()
+        f.relative_to(COMFY_OUT.resolve())  # never outside ComfyUI's folder
+        f.unlink()
 
 
 def describe(name, headers=None, **extra):
@@ -318,6 +350,7 @@ async def run_comfy(base, graph, ctx, what):
                                                                       "type": it.get("type", "output")})
                             v.raise_for_status()
                             out.append((it["filename"], v.content))
+                            drop_comfy_copy(it)
         if not out:
             raise ToolError("ComfyUI finished but produced no file")
         return out, time.time() - t0
@@ -843,8 +876,17 @@ def announce():
         time.sleep(20)  # often enough to be listed again soon after the scheduler restarts
 
 
+def tidy():
+    while True:
+        gone = sweep()
+        if gone:
+            print(f"deleted {gone} old file(s)", file=sys.stderr, flush=True)
+        time.sleep(3600)
+
+
 if __name__ == "__main__":
     load_tools()
+    threading.Thread(target=tidy, daemon=True).start()
     threading.Thread(target=watch_tools, daemon=True).start()
     threading.Thread(target=announce, daemon=True).start()
     app = mcp.streamable_http_app(

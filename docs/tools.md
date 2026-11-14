@@ -20,6 +20,8 @@ Its settings are under `"media"` in the config, all optional:
 | `comfy_input_dir` | ComfyUI's input folder, where pictures passed to a tool are put. | `files/` |
 | `listen` | `{"host", "port"}` the server listens on. | `127.0.0.1`, `8090` |
 | `public_url`, `allowed_hosts` | The address other devices use (shown in the app), and the host names the server answers to. Needed behind a proxy. | this Mac only |
+| `keep_days` | Results and uploaded files older than this are deleted. `0` keeps them for good. | `7` |
+| `comfy_output_dir` | ComfyUI's output folder. Its own copy of a result is removed from there once the result is saved. | `output` next to `comfy_input_dir` |
 
 The server accepts the same access tokens as the scheduler, and tells the scheduler its address, which is
 how it appears under Endpoints in the app. `GET /health` lists the tools it made and names any it had to
@@ -35,7 +37,7 @@ writes a path on the caller's disk. There are two ways in each direction, and a 
 | Getting a result | `get_file` returns any file as part of its answer, and `resources/read` returns `pinecone://files/<name>`. With `inline_mb` set, a sound file also comes inside the answer that made it. | The answer's `url`. It is built on the address the caller used and carries its own permission (a signature and an end date, a week ahead), so a download tool, a player or `curl` fetches it without a key. |
 | Giving a file | `put_file` takes the file's bytes (base64). File parameters are marked `"x-file": true` in the tool's schema, for clients that send files by themselves. | `upload_link`, and the error for a path the server cannot see, answer with a link to `PUT` the file to (no key, one hour) and the name to pass afterwards. An http(s) link to the file works as an argument too. |
 
-Every result is kept in `~/.pinecone/files/`. Each answer starts by telling the calling model that it does not
+Every result is kept in `~/.pinecone/files/` for `keep_days` (a week), then deleted; a link ends when its file does. Each answer starts by telling the calling model that it does not
 have the file yet and has to download it. Sound is not sent inside answers unless `inline_mb` says so: a client
 that does not keep such content shows its model a placeholder, and the model then takes the file for delivered.
 
