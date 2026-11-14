@@ -140,7 +140,7 @@ def write_file(path, text, private=False):
     os.replace(tmp, path)
 
 
-LAUNCH_KEYS = ("cmd", "cwd", "port", "health", "start_timeout_s")
+LAUNCH_KEYS = ("cmd", "cwd", "port", "health", "start_timeout_s", "keep_cache")
 
 
 RAM_TOTAL_GB = round(psutil.virtual_memory().total / 2 ** 30, 1)
@@ -263,6 +263,7 @@ class Res:
         self.keep = cfg.get("keep_alive_s", 300)
         self.min_res = cfg.get("min_residency_s", 60)
         self.idle_stop = cfg.get("idle_stop_s")
+        self.keep_cache = cfg.get("keep_cache", False)
 
     def apply(self, cfg):
         """Take a new config. Returns True when part of it has to wait for the next load."""
@@ -608,7 +609,7 @@ class Scheduler:
             logs.mkdir(exist_ok=True)
             r.logf = open(logs / f"{r.name}.log", "ab")
             r.proc = await asyncio.create_subprocess_exec(
-                *r.cfg["cmd"], cwd=r.cfg.get("cwd"), stdout=r.logf, stderr=asyncio.subprocess.STDOUT,
+                *self.command(r), cwd=r.cfg.get("cwd"), stdout=r.logf, stderr=asyncio.subprocess.STDOUT,
                 stdin=asyncio.subprocess.DEVNULL, start_new_session=True)
             deadline = time.time() + r.cfg.get("start_timeout_s", 900)
             url = r.base + r.cfg.get("health", "/health")
@@ -627,6 +628,7 @@ class Scheduler:
             r.state = "ready"
             r.error = None
             r.run += 1
+            await self.restore_cache(r)
             r.loaded_at = r.last_used = time.time()
             self.note(f"{r.name} ready after {int(r.loaded_at - r.started_at)}s")
         except Exception as e:  # noqa: BLE001
@@ -673,7 +675,85 @@ class Scheduler:
         r.state = "off"
         self.step()
 
+    # ---- what a model has read, kept across a stop ----------------------
+    # A llama.cpp server holds, per slot, what it has read of a conversation, and reads only what
+    # is new. Stopping it throws that away: the next message of every conversation is read from its
+    # first word again, which takes a minute where it took a second. With "keep_cache" the slots
+    # are written to disk before the server is stopped and read back when it has started again.
+    def cache_dir(self, r):
+        return (self.path.parent if self.path else HERE) / "cache" / r.name
+
+    def command(self, r):
+        cmd = list(r.cfg["cmd"])
+        if r.keep_cache and "--slot-save-path" not in cmd:
+            self.cache_dir(r).mkdir(parents=True, exist_ok=True)
+            cmd += ["--slot-save-path", str(self.cache_dir(r))]
+        return cmd
+
+    @staticmethod
+    def launch_stamp(r):
+        """What a saved slot belongs to: it can only be read back by the same model started the same way."""
+        return hashlib.sha256(json.dumps(r.cfg["cmd"]).encode()).hexdigest()[:16]
+
+    async def save_cache(self, r):
+        if not r.keep_cache or r.proc is None or r.proc.returncode is not None:
+            return
+        d = self.cache_dir(r)
+        t0, saved, size = time.time(), 0, 0
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            for old in d.glob("slot-*.bin"):
+                old.unlink()
+            async with self.http.get(r.base + "/slots", timeout=ClientTimeout(total=10)) as resp:
+                slots = await resp.json() if resp.status == 200 else []
+            for slot in slots if isinstance(slots, list) else []:
+                sid = slot.get("id")
+                if sid is None:
+                    continue
+                try:
+                    async with self.http.post(f"{r.base}/slots/{sid}?action=save", json={"filename": f"slot-{sid}.bin"},
+                                              timeout=ClientTimeout(total=r.cfg.get("keep_cache_timeout_s", 120))) as resp:
+                        j = await resp.json() if resp.status == 200 else {}
+                    if j.get("n_saved"):
+                        saved += 1
+                        size += j.get("n_written", 0)
+                    else:  # an empty slot leaves a file that holds nothing
+                        (d / f"slot-{sid}.bin").unlink(missing_ok=True)
+                except (ClientError, asyncio.TimeoutError, OSError, ValueError):
+                    (d / f"slot-{sid}.bin").unlink(missing_ok=True)
+            if saved:
+                (d / "stamp").write_text(self.launch_stamp(r))
+                self.note(f"kept what {r.name} had read: {saved} slot{'s' if saved != 1 else ''}, {size / 2 ** 30:.1f} GB, {time.time() - t0:.1f}s")
+        except (ClientError, asyncio.TimeoutError, OSError, ValueError) as e:
+            self.note(f"could not keep what {r.name} had read: {e}")
+
+    async def restore_cache(self, r):
+        if not r.keep_cache:
+            return
+        d = self.cache_dir(r)
+        files = sorted(d.glob("slot-*.bin")) if d.is_dir() else []
+        if not files:
+            return
+        stamp = d / "stamp"
+        t0, back = time.time(), 0
+        try:
+            if not stamp.exists() or stamp.read_text() != self.launch_stamp(r):
+                raise ValueError("it was saved by a model that was started differently")
+            for f in files:
+                sid = f.stem.split("-", 1)[1]
+                async with self.http.post(f"{r.base}/slots/{sid}?action=restore", json={"filename": f.name},
+                                          timeout=ClientTimeout(total=r.cfg.get("keep_cache_timeout_s", 120))) as resp:
+                    j = await resp.json() if resp.status == 200 else {}
+                back += 1 if j.get("n_restored") else 0
+            if back:
+                self.note(f"{r.name} has back what it had read: {back} slot{'s' if back != 1 else ''}, {time.time() - t0:.1f}s")
+        except (ClientError, asyncio.TimeoutError, OSError, ValueError) as e:
+            self.note(f"{r.name} starts without what it had read: {e}")
+        for f in [*files, stamp]:  # read back or not, it is used up: what is kept is only ever the last stop's
+            f.unlink(missing_ok=True)
+
     async def stop(self, r):
+        await self.save_cache(r)
         await self.kill(r)
         r.state = "off"
         self.note(f"{r.name} stopped")
@@ -726,6 +806,7 @@ class Scheduler:
     async def shutdown(self):
         for t in list(self.tasks):
             t.cancel()
+        await asyncio.gather(*(self.save_cache(r) for r in self.res.values() if r.state == "ready"))
         await asyncio.gather(*(self.kill(r) for r in self.res.values()))
         if self.gpu_limit["managed"] and not self.gpu_limit["error"]:
             await self.set_gpu_limit(0)

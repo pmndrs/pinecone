@@ -35,6 +35,7 @@ Each entry in `resources` is one server the scheduler may start. Its name is wha
 | `keep_alive_s` | How long it stays loaded after its last request even when something else wants the memory. | `300` |
 | `min_residency_s` | How long it stays loaded at least, once started. | `60` |
 | `idle_stop_s` | Stop it after this long without work, even if nothing else needs the memory. | never |
+| `keep_cache` | For a llama.cpp server: write what its slots have read to disk before it is stopped, and read it back when it has started again. Without it, the first message of every conversation after a reload is read from its first word. The files are in `cache/<name>/` next to the config, one per slot, and can be several GB each. | `false` |
 
 `cmd` is all the scheduler knows about a server. It runs the command, waits for `health` to answer on
 `port`, and sends requests there. To unload, it ends the process it started (and force-quits it if it has

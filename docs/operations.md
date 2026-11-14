@@ -41,6 +41,10 @@ A change to the config needs no restart. A restart is for new program code, or a
 
     .venv/bin/python scheduler/scheduler.py scheduler/tests/config.json &     # stand-in servers, port 18080
     .venv/bin/python scheduler/tests/run.py
-    .venv/bin/python scheduler/tests/reload.py       # these two start their own scheduler
+    .venv/bin/python scheduler/tests/reload.py       # these three start their own scheduler
+    .venv/bin/python scheduler/tests/cache.py
+    # keep_cache against a real llama.cpp server (not needed for the others): any model file will do, tiny_model.py makes one
+    python scheduler/tests/tiny_model.py <llama.cpp checkout> /tmp/tiny.gguf     # needs numpy
+    .venv/bin/python scheduler/tests/cache_live.py <llama-server> /tmp/tiny.gguf
     .venv/bin/python scheduler/tests/settings.py
     .venv/bin/python media_mcp/tests/tools.py        # the tools of the example config, no services needed
