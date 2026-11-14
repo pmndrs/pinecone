@@ -74,5 +74,20 @@ async def main():
     server.COMFY_OUT = HOME / "out"; (HOME / "out" / "mcp").mkdir(parents=True); (HOME / "out" / "mcp" / "a.png").write_bytes(b"x")
     server.drop_comfy_copy({"filename": "a.png", "subfolder": "mcp", "type": "output"}); server.drop_comfy_copy({"filename": "config.json", "subfolder": "..", "type": "output"})
     check("ComfyUI's copy of a result is removed, and nothing outside its folder", not (HOME / "out" / "mcp" / "a.png").exists() and f.exists() and (HOME / "config.json").exists())
+    import httpx
+    sent, real = [], httpx.AsyncClient
+    def answer(request):  # a scheduler and a ComfyUI whose job never ends
+        sent.append((request.method, request.url.path, json.loads(request.content or b"null")))
+        return httpx.Response(200, json={"prompt_id": "job1", "lease": "lease1", "url": "http://comfy"})
+    server.httpx.AsyncClient = lambda **kw: real(transport=httpx.MockTransport(answer), **{k: v for k, v in kw.items() if k != "transport"})
+    async def call():
+        async with server.lease("comfy", "a tool") as base:
+            await server.run_comfy(base, {}, None, "a tool")
+    with __import__("anyio").move_on_after(1.5):  # cancelled the way the MCP library does it: every later await fails
+        await call()
+    server.httpx.AsyncClient = real
+    check("a call whose client went away stops its job and gives the service back",
+          ("POST", "/interrupt", {"prompt_id": "job1"}) in sent and ("POST", "/queue", {"delete": ["job1"]}) in sent
+          and ("POST", "/scheduler/release", {"lease": "lease1"}) in sent, str([x[1] for x in sent]))
     print("ALL PASS" if ok else "SOME FAILED"); sys.exit(0 if ok else 1)
 asyncio.run(main())

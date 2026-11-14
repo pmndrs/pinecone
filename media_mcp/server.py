@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import parse_qs, quote, urlsplit
 
+import anyio
 import httpx
 import uvicorn
 from pydantic import Field
@@ -208,6 +209,14 @@ async def progress(ctx, message):
         await ctx.report_progress(0, None, message)
 
 
+async def even_if_cancelled(send):
+    """Make one short request to the end although the call around it was cancelled (its client went away).
+    Without this a cancelled call cannot say goodbye: every await in it fails at once."""
+    with anyio.CancelScope(shield=True), contextlib.suppress(Exception):
+        with anyio.fail_after(10):
+            await send()
+
+
 @contextlib.asynccontextmanager
 async def lease(resource, who, ctx=None):
     """Hold a scheduler lease on a service for the length of the block."""
@@ -243,8 +252,7 @@ async def lease(resource, who, ctx=None):
             yield info["url"]
         finally:
             keeper.cancel()
-            with contextlib.suppress(Exception):
-                await c.post(f"{SCHED}/scheduler/release", json={"lease": info["lease"]})
+            await even_if_cancelled(lambda: c.post(f"{SCHED}/scheduler/release", json={"lease": info["lease"]}))
 
 
 MAX_FETCH = 256 << 20   # the largest file taken from a link
@@ -327,18 +335,23 @@ async def run_comfy(base, graph, ctx, what):
             raise ToolError(f"ComfyUI refused the job: {r.text[:500]}")
         pid = r.json()["prompt_id"]
         t0 = time.time()
-        while True:
-            await asyncio.sleep(1)
-            if time.time() - t0 > COMFY_PATIENCE:  # ComfyUI lost the job, e.g. it was restarted: do not hold it forever
-                raise ToolError(f"ComfyUI did not finish within {COMFY_PATIENCE // 60} minutes.")
-            h = (await c.get(f"{base}/history/{pid}")).json().get(pid)
-            if h and h.get("status", {}).get("completed"):
-                break
-            if h and h.get("status", {}).get("status_str") == "error":
-                msgs = [m[1].get("exception_message", "") for m in h["status"].get("messages", []) if m[0] == "execution_error"]
-                raise ToolError("ComfyUI failed: " + (" ".join(msgs)[:500] or "unknown error"))
-            if int(time.time() - t0) % 15 == 0:
-                await progress(ctx, f"{what}: {int(time.time() - t0)}s")
+        try:
+            while True:
+                await asyncio.sleep(1)
+                if time.time() - t0 > COMFY_PATIENCE:  # ComfyUI lost the job, e.g. it was restarted: do not hold it forever
+                    raise ToolError(f"ComfyUI did not finish within {COMFY_PATIENCE // 60} minutes.")
+                h = (await c.get(f"{base}/history/{pid}")).json().get(pid)
+                if h and h.get("status", {}).get("completed"):
+                    break
+                if h and h.get("status", {}).get("status_str") == "error":
+                    msgs = [m[1].get("exception_message", "") for m in h["status"].get("messages", []) if m[0] == "execution_error"]
+                    raise ToolError("ComfyUI failed: " + (" ".join(msgs)[:500] or "it was stopped"))
+                if int(time.time() - t0) % 15 == 0:
+                    await progress(ctx, f"{what}: {int(time.time() - t0)}s")
+        except BaseException:  # nobody waits for this job any more: it must not go on working in a service we let go of
+            await even_if_cancelled(lambda: c.post(f"{base}/queue", json={"delete": [pid]}))
+            await even_if_cancelled(lambda: c.post(f"{base}/interrupt", json={"prompt_id": pid}))
+            raise
         out = []
         for node in h["outputs"].values():
             for items in node.values():
